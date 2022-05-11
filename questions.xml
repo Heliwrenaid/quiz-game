@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<questions number_of_answers="3">
+	<question text="What is your fav...">
+		<answer>Answer 1</answer>
+		<answer>Answer 2</answer>
+		<answer correct="true">Answer 3</answer>
+	</question>
+	<question text="Why do ...">
+		<answer>Answer 21</answer>
+		<answer correct="true">Answer 22</answer>
+		<answer>Answer 23</answer>
+	</question>
+</questions>
