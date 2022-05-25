@@ -22,8 +22,18 @@ struct questions {
 
 
 void
-parse_question(char * question) {
-    // TODO
+parse_question(char * value) {
+    int counter = -1;
+    while (value != NULL) {
+        if (counter == 0) {
+            printf("Question: %s\n", value);
+        } else if (counter > 0) {
+            printf("  [%d] %s\n", counter, value);
+        }
+        
+        value = strtok(NULL, DELIMITER);
+        counter++;
+    } 
 }
 
 int
@@ -34,17 +44,8 @@ parse_message(char * message) {
         printf("parse error\n");
         exit(1);
     }else if(strcmp(value, "question") == 0) {
-        int counter = -1;
-        while (value != NULL) {
-            if (counter == 0) {
-                printf("Question: %s\n", value);
-            } else if (counter > 0) {
-                printf("  [%d] %s\n", counter, value);
-            }
-            
-            value = strtok(NULL, DELIMITER);
-            counter++;
-        }
+         parse_question(message);
+         return 0;
     } else {
         return -1;
     }
@@ -97,36 +98,38 @@ func(int sockfd)
         action_type = parse_message(buffer);
 
         switch (action_type) {
-        case -1:
+            case -1: {
 
-            printf("Parse message error\n");
-            exit(1);
-            break;
+                printf("Parse message error\n");
+                exit(1);
+            
+            } break;
 
-        case 0:
+            case 0: {
 
-            while (selection < 1 || selection > 3) { // TODO: need number of answers and timeout
-                printf("Select answer: ");
-                int result = scanf("%d", &selection);
+                while (selection < 1 || selection > 3) { // TODO: need number of answers and timeout
+                    printf("Select answer: ");
+                    int result = scanf("%d", &selection);
 
-                if (result == 0) {
-                    while (fgetc(stdin) != '\n'); // Read until a newline is found
-                }
+                    if (result == 0) {
+                        while (fgetc(stdin) != '\n'); // Read until a newline is found
+                    }
+                }         
+                
+                send_answer(sockfd, selection - 1);
+                selection = 0;
+
+            } break;
+
+            default: {
+                printf("Unknown action");
+                exit(1);
             }
-            
-            printf("\nTUTAJ\n\n");
-            
-            
-            send_answer(sockfd, selection - 1);
-            break;
-        default:
-            printf("Unknown action");
-            exit(1);
         }
         
 
         bzero(buffer, MAX_SIZE);
-        if (n <= 0) break;
+        //if (n <= 0) break;
         n = 0;
     }
 }
