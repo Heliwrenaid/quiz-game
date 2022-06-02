@@ -36,6 +36,27 @@ parse_question(char * value) {
     } 
 }
 
+void
+parse_results(char * value) {
+    printf("\n---- RESULTS ----\n");
+
+    int counter = -1;
+    while (value != NULL) {
+        if (counter == 0) {
+            printf("Player %s: ", value);
+        } else if (counter == 1) {
+            printf("%s\n", value);
+        } else if (counter > 1) {
+            counter = 0;
+            continue;
+        }
+        
+        value = strtok(NULL, DELIMITER);
+        counter++;
+    }
+    printf("\n");
+}
+
 int
 parse_message(char * message) {
     char * value = strtok(message, DELIMITER);
@@ -43,9 +64,12 @@ parse_message(char * message) {
     if (value == NULL) {
         printf("parse error\n");
         exit(1);
-    }else if(strcmp(value, "question") == 0) {
+    } else if(strcmp(value, "question") == 0) {
          parse_question(message);
          return 0;
+    } else if(strcmp(value, "result") == 0) {
+         parse_results(message);
+         return 1;
     } else {
         return -1;
     }
@@ -81,13 +105,15 @@ send_answer(int sockfd, int asnwer) {
 }
 
 void 
-func(int sockfd)
+game_loop(int sockfd)
 {
     char buffer[MAX_SIZE];
     int n;
     int action_type;
     int selection;
-    for (;;) {
+    bool is_game_ended;
+
+    while(!is_game_ended) {
         
         if (n = recv(sockfd, buffer, sizeof(buffer), 0) < 0) { // TODO: some random bytes are readed at the end
             printf("Couldn't receive\n");
@@ -120,6 +146,9 @@ func(int sockfd)
                 selection = 0;
 
             } break;
+
+            case 1: is_game_ended = true;
+            break;
 
             default: {
                 printf("Unknown action");
@@ -162,7 +191,7 @@ int main()
     else
         printf("Connected to the server..\n");
    
-    func(sockfd);
+    game_loop(sockfd);
    
     // close the socket
     close(sockfd);
