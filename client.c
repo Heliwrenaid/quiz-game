@@ -7,12 +7,16 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdbool.h>
+#include <time.h>
+#include <sys/time.h>
+#include <signal.h>
 
 #define PORT 9034
 #define SA struct sockaddr
 #define DELIMITER "##"
 #define MAX_SIZE 1024
 
+#define PLAYER_MAX_NICK_LEN 15
 
 struct questions {
    char *text;
@@ -20,6 +24,11 @@ struct questions {
    int correct_answer;
 };
 
+void sighandler(int sig_num)
+{
+    signal(SIGTSTP, sighandler);
+    printf("\nCannot execute Ctrl+Z\n");
+}
 
 void
 parse_question(char * value) {
@@ -43,7 +52,7 @@ parse_results(char * value) {
     int counter = -1;
     while (value != NULL) {
         if (counter == 0) {
-            printf("Player %s: ", value);
+            printf("%s: ", value);
         } else if (counter == 1) {
             printf("%s\n", value);
         } else if (counter > 1) {
@@ -70,6 +79,8 @@ parse_message(char * message) {
     } else if(strcmp(value, "result") == 0) {
          parse_results(message);
          return 1;
+    } else if(strcmp(value, "config") == 0) {
+        return 2;
     } else {
         return -1;
     }
@@ -104,14 +115,25 @@ send_answer(int sockfd, int asnwer) {
     
 }
 
+void
+send_nick(int sockfd, char * nick) {
+    char buffer[30]; 
+    sprintf(buffer,"%s", nick);
+    int len = strlen(nick);
+    send_everything(sockfd, nick, &len);
+}
+
 void 
-game_loop(int sockfd)
+game_loop(int sockfd, char * player_nick)
 {
     char buffer[MAX_SIZE];
     int n;
     int action_type;
     int selection;
     bool is_game_ended;
+
+    int number_of_answers;
+    int timeout;
 
     while(!is_game_ended) {
         
@@ -133,15 +155,26 @@ game_loop(int sockfd)
 
             case 0: {
 
-                while (selection < 1 || selection > 3) { // TODO: need number of answers and timeout
-                    printf("Select answer: ");
-                    int result = scanf("%d", &selection);
+                struct timeval begin, end;
+                gettimeofday(&begin, 0);
+                long seconds = 0;
 
+                while (selection < 1 || selection > number_of_answers) { // TODO: display and handle timeout better
+                    printf("[%d] Select answer: ", timeout - seconds);
+                    int result = scanf("%d", &selection);
                     if (result == 0) {
                         while (fgetc(stdin) != '\n'); // Read until a newline is found
                     }
-                }         
-                
+
+                    gettimeofday(&end, 0);
+                    seconds = end.tv_sec - begin.tv_sec;
+
+                    if (seconds > timeout) {
+                        selection = 1;
+                        break;
+                    }
+                }
+
                 send_answer(sockfd, selection - 1);
                 selection = 0;
 
@@ -149,6 +182,29 @@ game_loop(int sockfd)
 
             case 1: is_game_ended = true;
             break;
+
+            case 2: {
+                
+                int counter = -1;
+                char * value = buffer;
+
+                while (value != NULL) {
+                    if (counter == 0) {
+                        number_of_answers = atoi(value);
+                    } else if (counter == 1) {
+                        timeout = atoi(value);
+                    } else if (counter > 1) {
+                        break;
+                    } 
+                
+                    value = strtok(NULL, DELIMITER);
+                    counter++;
+                }
+
+                //send_nick(sockfd, player_nick);
+                int len = strlen(player_nick);
+                send_everything(sockfd, player_nick, &len);
+            } break;
 
             default: {
                 printf("Unknown action");
@@ -163,8 +219,23 @@ game_loop(int sockfd)
     }
 }
    
-int main()
-{
+int main (int argc, char *argv[]) {
+    if (argc < 2) {
+        printf("Usage: ./client <NICK> [IP_ADDRESS]\n");
+        return 1;
+    }
+
+    if (argc < 3) {
+        argv[2] = "127.0.0.1";
+    }
+
+    if (strlen(argv[1]) > PLAYER_MAX_NICK_LEN) {
+        printf("Passed nick is too long\n");
+        return 1;
+    }
+
+    signal(SIGTSTP, sighandler);
+
     int sockfd, connfd;
     struct sockaddr_in servaddr, cli;
    
@@ -180,8 +251,16 @@ int main()
    
     // assign IP, PORT
     servaddr.sin_family = AF_INET;
-    servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
     servaddr.sin_port = htons(PORT);
+
+    int error;
+	if ((error = inet_pton(AF_INET, argv[2], &servaddr.sin_addr)) == -1) {
+		printf("inet_pton error \n");
+		exit(1);
+	} else if (error = 0) { 
+        printf("Addres error \n");
+		exit(1);
+	}
    
     // connect the client socket to server socket
     if (connect(sockfd, (SA*)&servaddr, sizeof(servaddr)) != 0) {
@@ -191,7 +270,7 @@ int main()
     else
         printf("Connected to the server..\n");
    
-    game_loop(sockfd);
+    game_loop(sockfd, argv[1]);
    
     // close the socket
     close(sockfd);
