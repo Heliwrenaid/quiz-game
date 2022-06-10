@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <questions number_of_answers="3" timeout="20">
-	<question text="What is your fav...">
-		<answer>Answer 1</answer>
-		<answer>Answer 2</answer>
-		<answer correct="true">Answer 3</answer>
+	<question text="Who invented GIT tool ?">
+		<answer>Mark Zuckerberg</answer>
+		<answer correct="true">Linus Torvalds</answer>
+		<answer>Robert C. Martin</answer>
 	</question>
-	<question text="Why ...">
-		<answer>Answer 21</answer>
-		<answer correct="true">Answer 22</answer>
-		<answer>Answer 23</answer>
+	<question text="What is J.R.R Tolkien's most famous novel series ?">
+		<answer>The Chronicles of Narnia</answer>
+		<answer>Harry Potter</answer>
+		<answer correct="true">The Lord of the Rings</answer>
 	</question>
 </questions>

@@ -18,6 +18,8 @@
 
 #define PLAYER_MAX_NICK_LEN 15
 
+int sockfd;
+
 struct questions {
    char *text;
    char **answers;
@@ -31,11 +33,16 @@ void sighandler(int sig_num)
 }
 
 void
+sig_int_handler(int dummy) {
+    close(sockfd);
+}
+
+void
 parse_question(char * value) {
     int counter = -1;
     while (value != NULL) {
         if (counter == 0) {
-            printf("Question: %s\n", value);
+            printf("\n\n----------\nQuestion: %s\n", value);
         } else if (counter > 0) {
             printf("  [%d] %s\n", counter, value);
         }
@@ -47,7 +54,7 @@ parse_question(char * value) {
 
 void
 parse_results(char * value) {
-    printf("\n---- RESULTS ----\n");
+    printf("\n\n---- RESULTS ----\n");
 
     int counter = -1;
     while (value != NULL) {
@@ -137,11 +144,10 @@ game_loop(int sockfd, char * player_nick)
 
     while(!is_game_ended) {
         
-        if (n = recv(sockfd, buffer, sizeof(buffer), 0) < 0) { // TODO: some random bytes are readed at the end
+        if (n = recv(sockfd, buffer, sizeof(buffer), 0) < 0) {
             printf("Couldn't receive\n");
-            //return -1;
         }
-        printf("RECEIVED: %s\n", buffer);
+        //printf("RECEIVED: %s\n", buffer);
 
         action_type = parse_message(buffer);
 
@@ -155,26 +161,52 @@ game_loop(int sockfd, char * player_nick)
 
             case 0: {
 
+                fd_set input_fds;
+                fd_set read_fds;
+
+                FD_SET(0, &input_fds);
+
+                struct timeval non_block;
+                non_block.tv_sec = 0;
+                non_block.tv_usec = 0;
+
                 struct timeval begin, end;
                 gettimeofday(&begin, 0);
                 long seconds = 0;
 
-                while (selection < 1 || selection > number_of_answers) { // TODO: display and handle timeout better
-                    printf("[%d] Select answer: ", timeout - seconds);
-                    int result = scanf("%d", &selection);
-                    if (result == 0) {
-                        while (fgetc(stdin) != '\n'); // Read until a newline is found
-                    }
+                char selection_c;
+
+                for(;;) {
 
                     gettimeofday(&end, 0);
                     seconds = end.tv_sec - begin.tv_sec;
 
                     if (seconds > timeout) {
-                        selection = 1;
+                        selection = 13;
                         break;
                     }
-                }
 
+                    read_fds = input_fds;
+                    if(select(1, &read_fds, NULL, NULL, &non_block) == -1) {
+                        perror("select");
+                        exit(1);
+                    }
+                    
+                    printf("\r[%d] Select answer: ", timeout - seconds);
+
+                    if (FD_ISSET(0, &read_fds)) {
+                        scanf("%c", &selection_c);
+                        selection = (int) selection_c - 48;
+                        if (selection == -38) continue; // ENTER
+                        if (selection < 1 || selection > number_of_answers) {
+                            printf("\rWrong answer number: %d\n", selection);
+                        } else {
+                            printf("\r[%d] Select answer: ", timeout - seconds);
+                            break;
+                        }
+                    }
+                }
+                printf("\n\nSelected answer: %d\n", selection);
                 send_answer(sockfd, selection - 1);
                 selection = 0;
 
@@ -221,7 +253,7 @@ game_loop(int sockfd, char * player_nick)
    
 int main (int argc, char *argv[]) {
     if (argc < 2) {
-        printf("Usage: ./client <NICK> [IP_ADDRESS]\n");
+        printf("Usage: ./client <NICK> [IP_ADDRESS] [PORT]\n");
         return 1;
     }
 
@@ -235,8 +267,8 @@ int main (int argc, char *argv[]) {
     }
 
     signal(SIGTSTP, sighandler);
+    signal(SIGINT, sig_int_handler);
 
-    int sockfd, connfd;
     struct sockaddr_in servaddr, cli;
    
     // socket create and verification
@@ -251,7 +283,11 @@ int main (int argc, char *argv[]) {
    
     // assign IP, PORT
     servaddr.sin_family = AF_INET;
-    servaddr.sin_port = htons(PORT);
+    if (argc >= 4) {
+        servaddr.sin_port = htons(atoi(argv[3]));
+    } else {
+        servaddr.sin_port = htons(PORT);
+    }
 
     int error;
 	if ((error = inet_pton(AF_INET, argv[2], &servaddr.sin_addr)) == -1) {
@@ -268,7 +304,7 @@ int main (int argc, char *argv[]) {
         exit(0);
     }
     else
-        printf("Connected to the server..\n");
+        printf("Connected to the server..");
    
     game_loop(sockfd, argv[1]);
    

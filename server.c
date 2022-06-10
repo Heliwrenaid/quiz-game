@@ -7,7 +7,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdbool.h>
-#include <sys/time.h>
 
 #include <libxml/parser.h>
 
@@ -94,7 +93,7 @@ get_game_config(const char* filename) {
     int i, j;
     for (i = 0; i < number_of_questions; i++) {
         node_attr = node->properties;
-        (questions + i)->text = (char*) malloc(sizeof(node_attr->children->content) * sizeof(char));
+        (questions + i)->text = (char*) malloc((strlen(node_attr->children->content) + 1) * sizeof(char));
         strcpy((questions + i)->text, node_attr->children->content);
         // get answers
         answer = node->children->next;
@@ -102,7 +101,8 @@ get_game_config(const char* filename) {
         for (j = 0; j < number_of_answers; j++) {
             
             if (strcmp(answer->name, "answer") == 0) {
-                answers[j] = (char*) malloc(sizeof(answer->children->content) * sizeof(char));
+                printf("%s: %d\n", answer->children->content, strlen(answer->children->content));
+                answers[j] = (char*) malloc((strlen(answer->children->content) + 1) * sizeof(char));
                 strcpy(answers[j], answer->children->content);
                 
                 //check if it is correct answer
@@ -223,6 +223,9 @@ bool
 can_go_to_next_question(struct player_data * players, int number_of_players) { // TODO: timeout
     int i;
     for (i = 0; i < number_of_players; i++) {
+        if (players[i].sockfd == -1) {
+            continue;
+        }
         if (players[i].sended_data == false || players[i].received_data == false) {
             return false;
         }
@@ -278,6 +281,8 @@ serialize_results(int sockfd, struct player_data * players, int number_of_player
 
     int i;
     for (i = 0; i < number_of_players; i++) {
+        if (players[i].sockfd == -1) continue;
+
         strcat(buffer, DELIMITER);
         strcat(buffer, players[i].nick);
 
@@ -327,9 +332,19 @@ send_configuration(int sockfd, struct game_config game_config) {
     return send_everything(sockfd, buffer, &len);
 }
 
+bool
+any_player_playing(struct player_data * players, int number_of_players) {
+    int i;
+    for (i = 0; i < number_of_players; i++) {
+        if (players[i].sockfd != -1) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int
-main(void)
-{
+main(int argc, char *argv[]) {
     bool game_started = false;
     struct game_config game_config = get_game_config("questions.xml");
     struct player_data * players = (struct player_data *) calloc(MAX_NUMBER_OF_PLAYERS, sizeof(struct player_data));
@@ -367,7 +382,12 @@ main(void)
     // bind
     myaddr.sin_family = AF_INET;
     myaddr.sin_addr.s_addr = INADDR_ANY;
-    myaddr.sin_port = htons(PORT);
+    if (argc >= 2) {
+        myaddr.sin_port = htons(atoi(argv[1]));
+    } else {
+        myaddr.sin_port = htons(PORT);
+    }
+
     memset(& (myaddr.sin_zero), '\0', 8);
     if(bind(listener,(struct sockaddr *) & myaddr, sizeof(myaddr)) == - 1) {
         perror("bind");
@@ -387,6 +407,7 @@ main(void)
     bool looping = true;
 
     printf("--- Waiting for clients ... ---\n");
+    printf("Listen on port: %d\n",ntohs(myaddr.sin_port));
     printf("Press ENTER to start the game\n");
 
     while(looping) {
@@ -436,38 +457,42 @@ main(void)
     close(listener);
 
     int n;
-    
+    int player_fd;
 
     // configuration phase
     char player_nick[PLAYER_MAX_NICK_LEN];
     for (i = 0; i < number_of_players; i++) {
-        
-        send_configuration(players[i].sockfd, game_config);
+        player_fd = players[i].sockfd;
 
-        if (n = recv(players[i].sockfd, player_nick, sizeof(player_nick), 0) < 0) {
-            printf("Couldn't receive\n");
-            //TODO: ???
+        send_configuration(player_fd, game_config);
+
+        if (n = recv(player_fd, player_nick, sizeof(player_nick), 0) <= 0) {
+            printf("Player on socket %d is disconnected\n", player_fd);
+            FD_CLR(player_fd, &players_fds);
+            players[i].sockfd = -1;
+            close(player_fd);
         } else {
-            printf("Received answer %s on socket %d\n", player_nick, players[i].sockfd);
+            printf("Received answer %s on socket %d\n", player_nick, player_fd);
             strcpy(players[i].nick, player_nick);
         }
+
+        memset(player_nick, '\0', sizeof(char)*PLAYER_MAX_NICK_LEN);
     }
 
     char buffer[11];
     int question_number = 0;
     bool is_first_answer = true;
     int answer;
-    int player_fd;
 
 
-    printf("--- GAME PHASE ---\n");
-    for(;;) {
+    printf("\n--- GAME PHASE ---\n");
+    while(any_player_playing(players, number_of_players)) {
 
         for(i = 0; i < number_of_players; i++) {
             player_fd = players[i].sockfd;
 
             if(FD_ISSET(player_fd, & players_fds) && !players[i].sended_data) {
-                printf("Sending question number %d to player %d\n", question_number, player_fd);
+                printf("Sending question number %d to player %s\n", question_number, players[i].nick);
                 if(send_question(player_fd, game_config.questions[question_number], game_config.number_of_answers) == - 1) {
                     perror( "sendall" );
                 } else {
@@ -488,11 +513,13 @@ main(void)
 
             if(FD_ISSET(player_fd, & read_fds) && !players[i].received_data) {
                
-                if (n = recv(player_fd, buffer, sizeof(buffer), 0) < 0){
-                    perror("Couldn't receive\n");
-                    exit(1);
+                if (n = recv(player_fd, buffer, sizeof(buffer), 0) <= 0){
+                    printf("Player %s is disconnected\n", players[i].nick);
+                    FD_CLR(player_fd, &players_fds);
+                    players[i].sockfd = -1;
+                    close(player_fd);
                 } else {
-                    printf("Received answer %s on socket %d\n", buffer, player_fd);
+                    printf("Received answer %s from player %s\n", buffer, players[i].nick);
 
                     players[i].received_data = true;
 
@@ -511,30 +538,26 @@ main(void)
             }
         }
         
-        // printf("AFTER RECEIVED -----------\n");
-        // debug_players(players, number_of_players);
 
         if (can_go_to_next_question(players, number_of_players)) {
             if (question_number < game_config.number_of_questions - 1) {
                 question_number++;
-                players_reset_flags(players, number_of_players); // TODO: check if works
+                players_reset_flags(players, number_of_players);
                 is_first_answer = true;
-                // printf("RESET -----------\n");
-                // debug_players(players, number_of_players);
             } else {
                 break;
             }
         }
-
-        
     }
 
-    printf("\n-------- GAME IS ENDED --------\n");
+    printf("\n--- GAME IS ENDED ---\n");
     
     //int i;
     for (i = 0; i < number_of_players; i++) {
-        printf("Sending result to %s: %d\n", players[i].nick, players[i].points);
-        send_results(players[i].sockfd, players, number_of_players);
+        if (players[i].sockfd != -1) {
+            printf("Sending result to %s: %d\n", players[i].nick, players[i].points);
+            send_results(players[i].sockfd, players, number_of_players);
+        }
     }
 
     delete_game_config(game_config);
